@@ -17,9 +17,15 @@ class Auth {
         },
         body: JSON.stringify({ email, senha }),
       });
+
+      if (!response.ok) {
+        throw new Error("Credenciais inválidas");
+      }
+
       const data = await response.json();
       if (data.token) {
         localStorage.setItem("token", data.token);
+        localStorage.setItem("user", JSON.stringify(data.user || {}));
         return true;
       }
       return false;
@@ -31,15 +37,22 @@ class Auth {
 
   static logout() {
     localStorage.removeItem("token");
-    window.location.href = "index.html";
+    localStorage.removeItem("user");
+    window.location.href = "admin.html";
   }
 
   static isAuthenticated() {
-    return !!localStorage.getItem("token");
+    const token = localStorage.getItem("token");
+    return !!token; // Simplificado - em produção, verificar expiração
   }
 
   static getToken() {
     return localStorage.getItem("token");
+  }
+
+  static getUser() {
+    const user = localStorage.getItem("user");
+    return user ? JSON.parse(user) : null;
   }
 }
 
@@ -72,6 +85,21 @@ class Unidades {
       return await response.json();
     } catch (error) {
       console.error("Erro ao cadastrar unidade:", error);
+      return null;
+    }
+  }
+
+  static async excluir(id) {
+    try {
+      const response = await fetch(`${config.apiUrl}/unidades/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${Auth.getToken()}`,
+        },
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Erro ao excluir unidade:", error);
       return null;
     }
   }
@@ -123,6 +151,23 @@ class Pacientes {
       return null;
     }
   }
+
+  static async editar(id, paciente) {
+    try {
+      const response = await fetch(`${config.apiUrl}/pacientes/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${Auth.getToken()}`,
+        },
+        body: JSON.stringify(paciente),
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Erro ao editar paciente:", error);
+      return null;
+    }
+  }
 }
 
 // Funções de Gestão de Profissionais
@@ -154,6 +199,23 @@ class Profissionais {
       return await response.json();
     } catch (error) {
       console.error("Erro ao cadastrar profissional:", error);
+      return null;
+    }
+  }
+
+  static async editar(id, profissional) {
+    try {
+      const response = await fetch(`${config.apiUrl}/profissionais/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${Auth.getToken()}`,
+        },
+        body: JSON.stringify(profissional),
+      });
+      return await response.json();
+    } catch (error) {
+      console.error("Erro ao editar profissional:", error);
       return null;
     }
   }
@@ -209,6 +271,24 @@ class Telemedicina {
       return null;
     }
   }
+
+  static async cancelarConsulta(id) {
+    try {
+      const response = await fetch(
+        `${config.apiUrl}/telemedicina/consultas/${id}/cancelar`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${Auth.getToken()}`,
+          },
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      console.error("Erro ao cancelar consulta:", error);
+      return null;
+    }
+  }
 }
 
 // Funções de Auditoria
@@ -239,7 +319,9 @@ class Auditoria {
           acao,
           modulo,
           detalhes,
+          usuario: Auth.getUser()?.nome || "Sistema",
           ip: await this.getIP(),
+          dataHora: new Date().toISOString(),
         }),
       });
       return await response.json();
@@ -261,173 +343,224 @@ class Auditoria {
   }
 }
 
-// Inicialização do sistema
-document.addEventListener("DOMContentLoaded", async () => {
-  // Verificar autenticação
+// Inicialização do sistema para páginas protegidas
+function inicializarSistemaProtegido() {
+  // Verificar autenticação para páginas protegidas
   if (!Auth.isAuthenticated()) {
-    window.location.href = "login.html";
-    return;
+    window.location.href = "admin.html";
+    return false;
   }
+  return true;
+}
 
-  // Carregar dados iniciais
-  await carregarUnidades();
-  await carregarPacientes();
-  await carregarProfissionais();
-  await carregarTeleconsultas();
-  await carregarLogs();
-
-  // Configurar event listeners
-  configurarEventListeners();
-});
+// Inicialização do sistema para página de login
+function inicializarPaginaLogin() {
+  // Se já está autenticado, redireciona para dashboard
+  if (Auth.isAuthenticated()) {
+    window.location.href = "dashboard.html";
+    return false;
+  }
+  return true;
+}
 
 // Funções de carregamento de dados
 async function carregarUnidades() {
-  const unidades = await Unidades.listar();
-  const tbody = document.getElementById("tabelaUnidades");
-  tbody.innerHTML = unidades
-    .map(
-      unidade => `
-        <tr>
-            <td>${unidade.nome}</td>
-            <td>${unidade.tipo}</td>
-            <td>${unidade.status}</td>
-            <td>${unidade.capacidade}</td>
-            <td>
-                <button class="btn btn-sm btn-primary" onclick="editarUnidade(${unidade.id})">
-                    <i class="fas fa-edit"></i>
-                </button>
-                <button class="btn btn-sm btn-danger" onclick="excluirUnidade(${unidade.id})">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </td>
-        </tr>
-    `
-    )
-    .join("");
+  try {
+    const unidades = await Unidades.listar();
+    const tbody = document.getElementById("tabelaUnidades");
+    if (tbody) {
+      tbody.innerHTML = unidades
+        .map(
+          unidade => `
+            <tr>
+                <td>${unidade.nome}</td>
+                <td>${unidade.tipo}</td>
+                <td>${unidade.status}</td>
+                <td>${unidade.capacidade}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="editarUnidade(${unidade.id})">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="excluirUnidade(${unidade.id})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `
+        )
+        .join("");
+    }
+  } catch (error) {
+    console.error("Erro ao carregar unidades:", error);
+  }
 }
 
 async function carregarPacientes() {
-  const pacientes = await Pacientes.listar();
-  const tbody = document.getElementById("tabelaPacientes");
-  tbody.innerHTML = pacientes
-    .map(
-      paciente => `
-        <tr>
-            <td>${paciente.id}</td>
-            <td>${paciente.nome}</td>
-            <td>${paciente.cpf}</td>
-            <td>${paciente.unidade}</td>
-            <td>${paciente.ultimaConsulta}</td>
-            <td>${paciente.status}</td>
-            <td>
-                <button class="btn btn-sm btn-primary" onclick="editarPaciente(${paciente.id})">
-                    <i class="fas fa-edit"></i>
-                </button>
-                <button class="btn btn-sm btn-info" onclick="visualizarProntuario(${paciente.id})">
-                    <i class="fas fa-file-medical"></i>
-                </button>
-            </td>
-        </tr>
-    `
-    )
-    .join("");
+  try {
+    const pacientes = await Pacientes.listar();
+    const tbody = document.getElementById("tabelaPacientes");
+    if (tbody) {
+      tbody.innerHTML = pacientes
+        .map(
+          paciente => `
+            <tr>
+                <td>${paciente.id}</td>
+                <td>${paciente.nome}</td>
+                <td>${paciente.cpf}</td>
+                <td>${paciente.unidade}</td>
+                <td>${paciente.ultimaConsulta || "N/A"}</td>
+                <td>${paciente.status}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="editarPaciente(${
+                      paciente.id
+                    })">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-info" onclick="visualizarProntuario(${
+                      paciente.id
+                    })">
+                        <i class="fas fa-file-medical"></i>
+                    </button>
+                </td>
+            </tr>
+        `
+        )
+        .join("");
+    }
+  } catch (error) {
+    console.error("Erro ao carregar pacientes:", error);
+  }
 }
 
 async function carregarProfissionais() {
-  const profissionais = await Profissionais.listar();
-  const tbody = document.getElementById("tabelaProfissionais");
-  tbody.innerHTML = profissionais
-    .map(
-      profissional => `
-        <tr>
-            <td>${profissional.id}</td>
-            <td>${profissional.nome}</td>
-            <td>${profissional.especialidade}</td>
-            <td>${profissional.unidade}</td>
-            <td>${profissional.status}</td>
-            <td>
-                <button class="btn btn-sm btn-primary" onclick="editarProfissional(${profissional.id})">
-                    <i class="fas fa-edit"></i>
-                </button>
-                <button class="btn btn-sm btn-info" onclick="visualizarAgenda(${profissional.id})">
-                    <i class="fas fa-calendar"></i>
-                </button>
-            </td>
-        </tr>
-    `
-    )
-    .join("");
+  try {
+    const profissionais = await Profissionais.listar();
+    const tbody = document.getElementById("tabelaProfissionais");
+    if (tbody) {
+      tbody.innerHTML = profissionais
+        .map(
+          profissional => `
+            <tr>
+                <td>${profissional.id}</td>
+                <td>${profissional.nome}</td>
+                <td>${profissional.especialidade}</td>
+                <td>${profissional.unidade}</td>
+                <td>${profissional.status}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="editarProfissional(${profissional.id})">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-sm btn-info" onclick="visualizarAgenda(${profissional.id})">
+                        <i class="fas fa-calendar"></i>
+                    </button>
+                </td>
+            </tr>
+        `
+        )
+        .join("");
+    }
+  } catch (error) {
+    console.error("Erro ao carregar profissionais:", error);
+  }
 }
 
 async function carregarTeleconsultas() {
-  const consultas = await Telemedicina.listarConsultas();
-  const tbody = document.getElementById("tabelaTeleconsultas");
-  tbody.innerHTML = consultas
-    .map(
-      consulta => `
-        <tr>
-            <td>${consulta.dataHora}</td>
-            <td>${consulta.paciente}</td>
-            <td>${consulta.profissional}</td>
-            <td>${consulta.status}</td>
-            <td>
-                <button class="btn btn-sm btn-success" onclick="iniciarConsulta(${consulta.id})">
-                    <i class="fas fa-video"></i>
-                </button>
-                <button class="btn btn-sm btn-danger" onclick="cancelarConsulta(${consulta.id})">
-                    <i class="fas fa-times"></i>
-                </button>
-            </td>
-        </tr>
-    `
-    )
-    .join("");
+  try {
+    const consultas = await Telemedicina.listarConsultas();
+    const tbody = document.getElementById("tabelaTeleconsultas");
+    if (tbody) {
+      tbody.innerHTML = consultas
+        .map(
+          consulta => `
+            <tr>
+                <td>${new Date(consulta.dataHora).toLocaleString()}</td>
+                <td>${consulta.paciente}</td>
+                <td>${consulta.profissional}</td>
+                <td>${consulta.status}</td>
+                <td>
+                    <button class="btn btn-sm btn-success" onclick="iniciarConsulta(${
+                      consulta.id
+                    })" ${consulta.status !== "Agendada" ? "disabled" : ""}>
+                        <i class="fas fa-video"></i>
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="cancelarConsulta(${
+                      consulta.id
+                    })" ${consulta.status !== "Agendada" ? "disabled" : ""}>
+                        <i class="fas fa-times"></i>
+                    </button>
+                </td>
+            </tr>
+        `
+        )
+        .join("");
+    }
+  } catch (error) {
+    console.error("Erro ao carregar teleconsultas:", error);
+  }
 }
 
 async function carregarLogs() {
-  const logs = await Auditoria.listarLogs();
-  const tbody = document.getElementById("tabelaAuditoria");
-  tbody.innerHTML = logs
-    .map(
-      log => `
-        <tr>
-            <td>${log.dataHora}</td>
-            <td>${log.usuario}</td>
-            <td>${log.acao}</td>
-            <td>${log.modulo}</td>
-            <td>${log.ip}</td>
-            <td>${log.detalhes}</td>
-        </tr>
-    `
-    )
-    .join("");
+  try {
+    const logs = await Auditoria.listarLogs();
+    const tbody = document.getElementById("tabelaAuditoria");
+    if (tbody) {
+      tbody.innerHTML = logs
+        .map(
+          log => `
+            <tr>
+                <td>${new Date(log.dataHora).toLocaleString()}</td>
+                <td>${log.usuario}</td>
+                <td>${log.acao}</td>
+                <td>${log.modulo}</td>
+                <td>${log.ip}</td>
+                <td>${log.detalhes}</td>
+            </tr>
+        `
+        )
+        .join("");
+    }
+  } catch (error) {
+    console.error("Erro ao carregar logs:", error);
+  }
 }
 
 // Configuração de event listeners
 function configurarEventListeners() {
   // Form de nova unidade
-  document.getElementById("formUnidade").addEventListener("submit", async e => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const unidade = {
-      nome: formData.get("nome"),
-      tipo: formData.get("tipo"),
-      endereco: formData.get("endereco"),
-      capacidade: formData.get("capacidade"),
-    };
-    await Unidades.cadastrar(unidade);
-    await carregarUnidades();
-    await Auditoria.registrarLog(
-      "Cadastro",
-      "Unidades",
-      `Nova unidade cadastrada: ${unidade.nome}`
-    );
-  });
+  const formUnidade = document.getElementById("formUnidade");
+  if (formUnidade) {
+    formUnidade.addEventListener("submit", async e => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const unidade = {
+        nome: formData.get("nome"),
+        tipo: formData.get("tipo"),
+        endereco: formData.get("endereco"),
+        capacidade: parseInt(formData.get("capacidade")),
+      };
+
+      const resultado = await Unidades.cadastrar(unidade);
+      if (resultado) {
+        await carregarUnidades();
+        await Auditoria.registrarLog(
+          "Cadastro",
+          "Unidades",
+          `Nova unidade cadastrada: ${unidade.nome}`
+        );
+        e.target.reset();
+        // Fechar modal se existir
+        const modal = bootstrap.Modal.getInstance(
+          document.getElementById("modalUnidade")
+        );
+        if (modal) modal.hide();
+      }
+    });
+  }
 
   // Form de novo profissional
-  document
-    .getElementById("formNovoProfissional")
-    .addEventListener("submit", async e => {
+  const formNovoProfissional = document.getElementById("formNovoProfissional");
+  if (formNovoProfissional) {
+    formNovoProfissional.addEventListener("submit", async e => {
       e.preventDefault();
       const formData = new FormData(e.target);
       const profissional = {
@@ -438,48 +571,192 @@ function configurarEventListeners() {
         email: formData.get("email"),
         senha: formData.get("senha"),
       };
-      await Profissionais.cadastrar(profissional);
-      await carregarProfissionais();
-      await Auditoria.registrarLog(
-        "Cadastro",
-        "Profissionais",
-        `Novo profissional cadastrado: ${profissional.nome}`
-      );
+
+      const resultado = await Profissionais.cadastrar(profissional);
+      if (resultado) {
+        await carregarProfissionais();
+        await Auditoria.registrarLog(
+          "Cadastro",
+          "Profissionais",
+          `Novo profissional cadastrado: ${profissional.nome}`
+        );
+        e.target.reset();
+        // Fechar modal se existir
+        const modal = bootstrap.Modal.getInstance(
+          document.getElementById("modalProfissional")
+        );
+        if (modal) modal.hide();
+      }
     });
+  }
+
+  // Form de novo paciente
+  const formNovoPaciente = document.getElementById("formNovoPaciente");
+  if (formNovoPaciente) {
+    formNovoPaciente.addEventListener("submit", async e => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const paciente = {
+        nome: formData.get("nome"),
+        cpf: formData.get("cpf"),
+        email: formData.get("email"),
+        telefone: formData.get("telefone"),
+        unidade: formData.get("unidade"),
+      };
+
+      const resultado = await Pacientes.cadastrar(paciente);
+      if (resultado) {
+        await carregarPacientes();
+        await Auditoria.registrarLog(
+          "Cadastro",
+          "Pacientes",
+          `Novo paciente cadastrado: ${paciente.nome}`
+        );
+        e.target.reset();
+        // Fechar modal se existir
+        const modal = bootstrap.Modal.getInstance(
+          document.getElementById("modalPaciente")
+        );
+        if (modal) modal.hide();
+      }
+    });
+  }
+
+  // Botão de logout
+  const btnLogout = document.getElementById("btnLogout");
+  if (btnLogout) {
+    btnLogout.addEventListener("click", () => {
+      Auth.logout();
+    });
+  }
 }
 
 // Funções de manipulação de dados
 async function editarUnidade(id) {
   // Implementar edição de unidade
+  console.log("Editar unidade:", id);
 }
 
 async function excluirUnidade(id) {
-  // Implementar exclusão de unidade
+  if (confirm("Tem certeza que deseja excluir esta unidade?")) {
+    const resultado = await Unidades.excluir(id);
+    if (resultado) {
+      await carregarUnidades();
+      await Auditoria.registrarLog(
+        "Exclusão",
+        "Unidades",
+        `Unidade excluída: ID ${id}`
+      );
+    }
+  }
 }
 
 async function editarPaciente(id) {
   // Implementar edição de paciente
+  console.log("Editar paciente:", id);
 }
 
 async function visualizarProntuario(id) {
   // Implementar visualização de prontuário
+  console.log("Visualizar prontuário:", id);
 }
 
 async function editarProfissional(id) {
   // Implementar edição de profissional
+  console.log("Editar profissional:", id);
 }
 
 async function visualizarAgenda(id) {
   // Implementar visualização de agenda
+  console.log("Visualizar agenda:", id);
 }
 
 async function iniciarConsulta(id) {
   const consulta = await Telemedicina.iniciarConsulta(id);
   if (consulta) {
+    await Auditoria.registrarLog(
+      "Início",
+      "Telemedicina",
+      `Consulta iniciada: ID ${id}`
+    );
     window.location.href = `teleconsulta.html?id=${id}`;
   }
 }
 
 async function cancelarConsulta(id) {
-  // Implementar cancelamento de consulta
+  if (confirm("Tem certeza que deseja cancelar esta consulta?")) {
+    const resultado = await Telemedicina.cancelarConsulta(id);
+    if (resultado) {
+      await carregarTeleconsultas();
+      await Auditoria.registrarLog(
+        "Cancelamento",
+        "Telemedicina",
+        `Consulta cancelada: ID ${id}`
+      );
+    }
+  }
 }
+
+// Função para inicializar a página de login
+function inicializarLogin() {
+  if (!inicializarPaginaLogin()) return;
+
+  const loginForm = document.getElementById("loginForm");
+  if (loginForm) {
+    loginForm.addEventListener("submit", async e => {
+      e.preventDefault();
+      const email = document.getElementById("email").value;
+      const senha = document.getElementById("senha").value;
+
+      const success = await Auth.login(email, senha);
+      if (success) {
+        await Auditoria.registrarLog(
+          "Login",
+          "Sistema",
+          `Usuário ${email} fez login`
+        );
+        window.location.href = "dashboard.html";
+      } else {
+        alert("Login falhou. Verifique suas credenciais.");
+      }
+    });
+  }
+}
+
+// Função para inicializar dashboard/páginas protegidas
+async function inicializarDashboard() {
+  if (!inicializarSistemaProtegido()) return;
+
+  try {
+    // Carregar todos os dados iniciais
+    await Promise.all([
+      carregarUnidades(),
+      carregarPacientes(),
+      carregarProfissionais(),
+      carregarTeleconsultas(),
+      carregarLogs(),
+    ]);
+
+    configurarEventListeners();
+
+    // Mostrar nome do usuário logado
+    const user = Auth.getUser();
+    const userElement = document.getElementById("userName");
+    if (userElement && user) {
+      userElement.textContent = user.nome || user.email;
+    }
+  } catch (error) {
+    console.error("Erro ao inicializar dashboard:", error);
+  }
+}
+
+// Inicialização automática baseada na página
+document.addEventListener("DOMContentLoaded", () => {
+  const currentPage = window.location.pathname.split("/").pop();
+
+  if (currentPage === "admin.html" || currentPage === "index.html") {
+    inicializarLogin();
+  } else {
+    inicializarDashboard();
+  }
+});
