@@ -79,4 +79,4 @@ Este projeto está sob a licença MIT. Veja o arquivo `LICENSE` para mais detalh
 ## Contato
 
 aluno Uninter - tharly rodrigues elizeu
-Link do Projeto: https://srigorpereira.github.io/projeto-front-end/
+numero: 86 99524-6508
