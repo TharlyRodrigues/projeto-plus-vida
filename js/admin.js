@@ -265,7 +265,7 @@ class Auditoria {
 document.addEventListener("DOMContentLoaded", async () => {
   // Verificar autenticação
   if (!Auth.isAuthenticated()) {
-    window.location.href = "admin.html";
+    window.location.href = "login.html";
     return;
   }
 
